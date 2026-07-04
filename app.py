@@ -24,7 +24,7 @@ def get_model():
     if _model is None:
         with _model_lock:
             if _model is None:
-                _model = StyleLoRAModel(model_name="Qwen/Qwen2.5-0.5B")
+                _model = StyleLoRAModel(model_name="Qwen/Qwen2.5-0.5B-Instruct")
     return _model
 
 
@@ -199,7 +199,7 @@ def create_ui():
         gr.Markdown(
             """
             # txtLoRA - 文本文风 LoRA 生成与转换
-            纯 PyTorch 实现的 LoRA 文风提取与转换工具。使用 Qwen2.5-0.5B 作为基座模型。
+            纯 PyTorch 实现的 LoRA 文风提取与转换工具。使用 Qwen2.5-0.5B-Instruct 作为基座模型。
             """,
             elem_classes="container",
         )
@@ -307,7 +307,7 @@ def create_ui():
             ---
             ### 技术说明
             - **LoRA 实现**: 纯 PyTorch，无外部依赖
-            - **基座模型**: Qwen2.5-0.5B (HuggingFace)
+            - **基座模型**: Qwen2.5-0.5B-Instruct (ModelScope)
             - **目标模块**: q_proj, k_proj, v_proj, o_proj
             - **训练方式**: 自回归语言模型 (Causal LM) 微调
             """,

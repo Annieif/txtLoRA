@@ -46,10 +46,11 @@ class StyleLoRAModel:
 
     # ModelScope model ID mapping
     MS_MODEL_MAP = {
+        "Qwen/Qwen2.5-0.5B-Instruct": "qwen/Qwen2.5-0.5B-Instruct",
         "Qwen/Qwen2.5-0.5B": "qwen/Qwen2.5-0.5B",
     }
 
-    def __init__(self, model_name: str = "Qwen/Qwen2.5-0.5B", device: str = None):
+    def __init__(self, model_name: str = "Qwen/Qwen2.5-0.5B-Instruct", device: str = None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model_name = model_name
         self.model = None
@@ -212,14 +213,22 @@ class StyleLoRAModel:
     def generate(
         self,
         prompt: str,
-        max_new_tokens: int = 200,
+        max_new_tokens: int = 256,
         temperature: float = 0.8,
         top_p: float = 0.9,
         top_k: int = 50,
         repetition_penalty: float = 1.1,
     ) -> str:
-        """Generate text using the base model + LoRA."""
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        """Generate text using the base model + LoRA with chat template."""
+        messages = [
+            {"role": "system", "content": "你是一个专业的文本风格转换助手。请根据用户的要求改写文本。"},
+            {"role": "user", "content": prompt},
+        ]
+        text = self.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+        input_len = inputs["input_ids"].shape[1]
 
         with torch.no_grad():
             outputs = self.model.generate(
@@ -234,14 +243,16 @@ class StyleLoRAModel:
                 eos_token_id=self.tokenizer.eos_token_id,
             )
 
-        generated = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return generated[len(prompt):] if generated.startswith(prompt) else generated
+        # Decode only the new tokens (skip the input prompt)
+        new_tokens = outputs[0][input_len:]
+        generated = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        return generated
 
     def style_transfer(
         self,
         text: str,
         style_lora_path: Optional[str] = None,
-        max_new_tokens: int = 200,
+        max_new_tokens: int = 256,
         temperature: float = 0.8,
     ) -> str:
         """
@@ -251,7 +262,7 @@ class StyleLoRAModel:
         if style_lora_path:
             self.load_lora(style_lora_path)
 
-        prompt = f"请将以下文本改写为指定风格：\n{text}\n改写后："
+        prompt = f"请将以下文本改写为目标风格，只输出改写后的文本，不要解释：\n\n{text}"
         return self.generate(prompt, max_new_tokens=max_new_tokens, temperature=temperature)
 
     def extract_and_transfer(
