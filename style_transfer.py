@@ -21,7 +21,7 @@ class StyleDataset(Dataset):
         self,
         style_texts: List[str],
         tokenizer,
-        max_length: int = 512,
+        max_length: int = 384,
         augment: bool = True,
         model=None,
     ):
@@ -33,35 +33,52 @@ class StyleDataset(Dataset):
     def _build_samples(self, style_texts: List[str], augment: bool, model):
         """Build instruction-style training samples from style examples."""
         style_desc = self._infer_style_description(style_texts)
+        n = len(style_texts)
 
+        # Target: ~12 instruction samples + all raw texts for Causal LM
+        max_instruction = max(8, min(16, n * 3))
+
+        pairs = []
         for style_text in style_texts:
-            # Sample 1: style_text as both input (paraphrased concept) and output
+            # Pair 1: paraphrased -> style
             paraphrased = self._light_paraphrase(style_text)
-            self._add_sample(paraphrased, style_text, style_desc)
+            pairs.append((paraphrased, style_text))
 
-            # Sample 2: generic sentence -> style
+            # Pair 2: generic -> style
             generic = self._make_generic_version(style_text)
             if generic != style_text:
-                self._add_sample(generic, style_text, style_desc)
+                pairs.append((generic, style_text))
 
-        if augment and len(style_texts) >= 2:
-            # Cross-sample augmentation: mix style A concept with style B expression
-            for i, style_a in enumerate(style_texts):
-                for j, style_b in enumerate(style_texts):
+        # Cross-sample augmentation (limit to keep total small)
+        if augment and n >= 2:
+            cross_pairs = []
+            indices = list(range(n))
+            random.shuffle(indices)
+            for i in indices:
+                for j in indices:
                     if i == j:
                         continue
-                    generic_a = self._make_generic_version(style_a)
-                    self._add_sample(generic_a, style_b, style_desc)
-                    if len(self.samples) >= 40:
+                    generic_a = self._make_generic_version(style_texts[i])
+                    cross_pairs.append((generic_a, style_texts[j]))
+                    if len(cross_pairs) >= max_instruction - len(pairs):
                         break
-                if len(self.samples) >= 40:
+                if len(pairs) + len(cross_pairs) >= max_instruction:
                     break
+            pairs.extend(cross_pairs)
+
+        # Trim to max_instruction
+        random.shuffle(pairs)
+        pairs = pairs[:max_instruction]
+
+        for input_text, output_text in pairs:
+            self._add_sample(input_text, output_text, style_desc)
 
         # Add raw style texts for style imitation (Causal LM)
         for style_text in style_texts:
             self.samples.append({
                 "full_text": style_text,
                 "labels_include_all": True,
+                "assistant_text": None,
             })
 
         random.shuffle(self.samples)
@@ -124,39 +141,59 @@ class StyleDataset(Dataset):
         sample = self.samples[idx]
         full_text = sample["full_text"]
 
+        # NO padding here - we use dynamic padding in collate_fn
         encoding = self.tokenizer(
             full_text,
             truncation=True,
             max_length=self.max_length,
-            padding="max_length",
-            return_tensors="pt",
+            padding=False,
+            return_tensors=None,
         )
-        input_ids = encoding["input_ids"].squeeze(0)
-        attention_mask = encoding["attention_mask"].squeeze(0)
-        labels = input_ids.clone()
+        input_ids = encoding["input_ids"]
+        attention_mask = encoding["attention_mask"]
+        labels = input_ids.copy()
 
         if not sample["labels_include_all"]:
-            # Mask out the system+user part, only compute loss on assistant response
-            # Find the last assistant turn
             assistant_text = sample.get("assistant_text", "")
             if assistant_text:
-                # Tokenize just the assistant response to find its position
-                # Approximate: find the position by tokenizing up to the assistant part
-                # For simplicity, set all labels to -100 except the last ~len(assistant) tokens
-                # Better approach: find the start of assistant in token space
                 sys_user_text = full_text[:full_text.rfind(assistant_text)]
                 sys_user_enc = self.tokenizer(sys_user_text, add_special_tokens=False)
-                sys_user_len = min(len(sys_user_enc["input_ids"]), self.max_length)
-                labels[:sys_user_len] = -100
+                sys_user_len = min(len(sys_user_enc["input_ids"]), len(labels))
+                labels[:sys_user_len] = [-100] * sys_user_len
 
         # Apply attention mask to labels
-        labels[attention_mask == 0] = -100
+        for i in range(len(labels)):
+            if attention_mask[i] == 0:
+                labels[i] = -100
 
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "labels": labels,
         }
+
+
+def style_collate_fn(batch, pad_token_id=0):
+    """Dynamic padding: pad to the max length in the batch."""
+    max_len = max(len(item["input_ids"]) for item in batch)
+
+    input_ids = []
+    attention_masks = []
+    labels = []
+
+    for item in batch:
+        seq_len = len(item["input_ids"])
+        pad_len = max_len - seq_len
+
+        input_ids.append(item["input_ids"] + [pad_token_id] * pad_len)
+        attention_masks.append(item["attention_mask"] + [0] * pad_len)
+        labels.append(item["labels"] + [-100] * pad_len)
+
+    return {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "attention_mask": torch.tensor(attention_masks, dtype=torch.long),
+        "labels": torch.tensor(labels, dtype=torch.long),
+    }
 
 
 class StyleLoRAModel:
@@ -243,13 +280,14 @@ class StyleLoRAModel:
     def train_style(
         self,
         texts: List[str],
-        epochs: int = 6,
+        epochs: int = 4,
         batch_size: int = 1,
         learning_rate: float = 2e-4,
-        max_length: int = 512,
+        max_length: int = 384,
         rank: int = 8,
         alpha: float = 16.0,
         progress_callback=None,
+        early_stop_patience: int = 2,
     ) -> dict:
         """
         Train LoRA on example texts to capture their style.
@@ -259,8 +297,12 @@ class StyleLoRAModel:
         if not self.lora_applied:
             self.apply_lora(rank=rank, alpha=alpha)
 
+        from functools import partial
+        pad_id = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else 0
+        collate_fn = partial(style_collate_fn, pad_token_id=pad_id)
+
         dataset = StyleDataset(texts, self.tokenizer, max_length, augment=True, model=self.model)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
         optimizer = torch.optim.AdamW(
             [p for p in self.model.parameters() if p.requires_grad],
@@ -272,9 +314,13 @@ class StyleLoRAModel:
         stats = {"epochs": [], "final_loss": 0.0}
         total_batches = len(dataloader)
         last_report_time = time.time()
+        best_loss = float("inf")
+        patience_counter = 0
 
         self.model.train()
+        actual_epochs = 0
         for epoch in range(epochs):
+            actual_epochs = epoch + 1
             epoch_loss = 0.0
             for batch_idx, batch in enumerate(dataloader):
                 input_ids = batch["input_ids"].to(self.device)
@@ -299,7 +345,7 @@ class StyleLoRAModel:
                 epoch_loss += loss.item()
 
                 current_time = time.time()
-                if current_time - last_report_time > 5 or batch_idx == total_batches - 1:
+                if current_time - last_report_time > 3 or batch_idx == total_batches - 1:
                     progress = (epoch * total_batches + batch_idx + 1) / (epochs * total_batches) * 100
                     print(f"[Progress {progress:.1f}%] Epoch {epoch+1}/{epochs}, Batch {batch_idx+1}/{total_batches}, Loss: {loss.item():.4f}")
                     last_report_time = current_time
@@ -317,8 +363,19 @@ class StyleLoRAModel:
             print(f"Epoch {epoch + 1}/{epochs} - Loss: {avg_loss:.4f}")
             scheduler.step()
 
+            # Early stopping
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                if patience_counter >= early_stop_patience:
+                    print(f"Early stopping at epoch {epoch + 1} (loss not improving)")
+                    break
+
         stats["final_loss"] = stats["epochs"][-1]["loss"]
         stats["num_samples"] = len(dataset)
+        stats["actual_epochs"] = actual_epochs
         self.model.eval()
         return stats
 

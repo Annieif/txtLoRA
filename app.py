@@ -60,7 +60,7 @@ def generate_lora_style(
             epochs=epochs,
             batch_size=1,
             learning_rate=learning_rate,
-            max_length=512,
+            max_length=384,
             rank=rank,
             alpha=rank * 2,
             progress_callback=lambda epoch, batch, total_batches, loss: None,
@@ -76,7 +76,7 @@ def generate_lora_style(
         summary += f"- 示例文本数: {len(texts)}\n"
         summary += f"- 训练样本数: {stats.get('num_samples', 'N/A')}\n"
         summary += f"- LoRA Rank: {rank}\n"
-        summary += f"- 训练轮数: {epochs}\n"
+        summary += f"- 实际训练轮数: {stats.get('actual_epochs', epochs)} / {epochs}\n"
         summary += f"- 学习率: {learning_rate}\n\n"
         summary += "### 每轮损失:\n"
         for ep in stats["epochs"]:
@@ -167,7 +167,7 @@ def quick_style_transfer(
             epochs=epochs,
             batch_size=1,
             learning_rate=learning_rate,
-            max_length=512,
+            max_length=384,
             rank=rank,
             alpha=rank * 2,
         )
@@ -185,7 +185,7 @@ def quick_style_transfer(
         summary = f"## 训练统计\n"
         summary += f"- 示例文本数: {len(texts)}\n"
         summary += f"- 训练样本数: {stats.get('num_samples', 'N/A')}\n"
-        summary += f"- Rank: {rank}, Epochs: {epochs}\n"
+        summary += f"- Rank: {rank}, 实际轮数: {stats.get('actual_epochs', epochs)} / {epochs}\n"
         for ep in stats["epochs"]:
             summary += f"- Epoch {ep['epoch']}: Loss = {ep['loss']:.4f}\n"
 
@@ -226,9 +226,9 @@ def create_ui():
                             lines=10,
                         )
                         with gr.Row():
-                            rank = gr.Slider(4, 32, value=8, step=4, label="LoRA Rank")
-                            epochs = gr.Slider(3, 15, value=6, step=1, label="训练轮数")
-                        lr = gr.Slider(5e-5, 5e-4, value=2e-4, step=5e-5, label="学习率")
+                            rank = gr.Slider(4, 16, value=8, step=4, label="LoRA Rank")
+                            epochs = gr.Slider(2, 8, value=4, step=1, label="训练轮数")
+                        lr = gr.Slider(1e-4, 5e-4, value=2e-4, step=5e-5, label="学习率")
                         train_btn = gr.Button("开始训练", variant="primary", size="lg")
                     with gr.Column():
                         train_output = gr.Markdown("训练结果将显示在这里", elem_classes="result-box")
@@ -285,10 +285,10 @@ def create_ui():
                             lines=4,
                         )
                         with gr.Row():
-                            p_rank = gr.Slider(4, 32, value=8, step=4, label="LoRA Rank")
-                            p_epochs = gr.Slider(3, 15, value=6, step=1, label="训练轮数")
+                            p_rank = gr.Slider(4, 16, value=8, step=4, label="LoRA Rank")
+                            p_epochs = gr.Slider(2, 8, value=4, step=1, label="训练轮数")
                         with gr.Row():
-                            p_lr = gr.Slider(5e-5, 5e-4, value=2e-4, step=5e-5, label="学习率")
+                            p_lr = gr.Slider(1e-4, 5e-4, value=2e-4, step=5e-5, label="学习率")
                             p_max_tokens = gr.Slider(50, 500, value=256, step=10, label="最大生成长度")
                         with gr.Row():
                             p_temp = gr.Slider(0.3, 2.0, value=0.9, step=0.1, label="Temperature")
