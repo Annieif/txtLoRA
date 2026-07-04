@@ -44,6 +44,11 @@ class StyleLoRAModel:
     Text style LoRA model for style extraction and transfer.
     """
 
+    # ModelScope model ID mapping
+    MS_MODEL_MAP = {
+        "Qwen/Qwen2.5-0.5B": "qwen/Qwen2.5-0.5B",
+    }
+
     def __init__(self, model_name: str = "Qwen/Qwen2.5-0.5B", device: str = None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model_name = model_name
@@ -53,21 +58,35 @@ class StyleLoRAModel:
         self._load_model()
 
     def _load_model(self):
-        """Load the base model and tokenizer."""
+        """Load the base model and tokenizer. Try ModelScope hub first, then HuggingFace."""
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         print(f"Loading model {self.model_name} on {self.device}...")
+
+        # Try to download from ModelScope first
+        model_path = self.model_name
+        ms_model_id = self.MS_MODEL_MAP.get(self.model_name, None)
+        if ms_model_id:
+            try:
+                from modelscope import snapshot_download
+                print(f"Downloading from ModelScope: {ms_model_id}")
+                model_path = snapshot_download(ms_model_id, cache_dir="/mnt/workspace/.cache")
+                print(f"Downloaded to: {model_path}")
+            except Exception as e:
+                print(f"ModelScope download failed: {e}, trying HuggingFace...")
+
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name, trust_remote_code=True
+            model_path, trust_remote_code=True
         )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
+            model_path,
             torch_dtype=torch.float32,
             trust_remote_code=True,
             device_map=None,
+            low_cpu_mem_usage=True,
         )
         self.model.to(self.device)
         self.model.eval()
