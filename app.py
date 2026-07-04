@@ -60,7 +60,9 @@ def generate_lora_style(
             epochs=epochs,
             batch_size=1,
             learning_rate=learning_rate,
-            max_length=256,
+            max_length=512,
+            rank=rank,
+            alpha=rank * 2,
             progress_callback=lambda epoch, batch, total_batches, loss: None,
         )
 
@@ -72,6 +74,7 @@ def generate_lora_style(
 
         summary = f"## 训练完成!\n\n"
         summary += f"- 示例文本数: {len(texts)}\n"
+        summary += f"- 训练样本数: {stats.get('num_samples', 'N/A')}\n"
         summary += f"- LoRA Rank: {rank}\n"
         summary += f"- 训练轮数: {epochs}\n"
         summary += f"- 学习率: {learning_rate}\n\n"
@@ -82,7 +85,8 @@ def generate_lora_style(
 
         return summary, tmp_path
     except Exception as e:
-        return f"训练失败: {str(e)}", None
+        import traceback
+        return f"训练失败: {str(e)}\n\n{traceback.format_exc()}", None
     finally:
         _training_in_progress = False
 
@@ -121,7 +125,8 @@ def transfer_style(
         progress(1.0, desc="完成!")
         return result
     except Exception as e:
-        return f"转换失败: {str(e)}"
+        import traceback
+        return f"转换失败: {str(e)}\n\n{traceback.format_exc()}"
 
 
 def quick_style_transfer(
@@ -162,7 +167,9 @@ def quick_style_transfer(
             epochs=epochs,
             batch_size=1,
             learning_rate=learning_rate,
-            max_length=256,
+            max_length=512,
+            rank=rank,
+            alpha=rank * 2,
         )
 
         progress(0.6, desc="文风转换生成中...")
@@ -170,19 +177,22 @@ def quick_style_transfer(
             target_text,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
+            style_examples=texts,
         )
 
         progress(1.0, desc="完成!")
 
         summary = f"## 训练统计\n"
         summary += f"- 示例文本数: {len(texts)}\n"
+        summary += f"- 训练样本数: {stats.get('num_samples', 'N/A')}\n"
         summary += f"- Rank: {rank}, Epochs: {epochs}\n"
         for ep in stats["epochs"]:
             summary += f"- Epoch {ep['epoch']}: Loss = {ep['loss']:.4f}\n"
 
         return summary, result
     except Exception as e:
-        return f"处理失败: {str(e)}", ""
+        import traceback
+        return f"处理失败: {str(e)}\n\n{traceback.format_exc()}", ""
     finally:
         _training_in_progress = False
 
@@ -212,13 +222,13 @@ def create_ui():
                     with gr.Column():
                         example_input = gr.Textbox(
                             label="示例文本（每行一个）",
-                            placeholder="输入具有统一风格的示例文本...\n例如：\n春眠不觉晓，处处闻啼鸟。\n夜来风雨声，花落知多少。",
+                            placeholder="输入具有统一风格的示例文本...\n例如：\n春眠不觉晓，处处闻啼鸟。\n夜来风雨声，花落知多少。\n床前明月光，疑是地上霜。",
                             lines=10,
                         )
                         with gr.Row():
-                            rank = gr.Slider(2, 32, value=8, step=2, label="LoRA Rank")
-                            epochs = gr.Slider(1, 20, value=5, step=1, label="训练轮数")
-                        lr = gr.Slider(1e-5, 1e-3, value=1e-4, step=1e-5, label="学习率")
+                            rank = gr.Slider(4, 64, value=16, step=4, label="LoRA Rank")
+                            epochs = gr.Slider(5, 30, value=10, step=1, label="训练轮数")
+                        lr = gr.Slider(1e-5, 5e-4, value=2e-4, step=1e-5, label="学习率")
                         train_btn = gr.Button("开始训练", variant="primary", size="lg")
                     with gr.Column():
                         train_output = gr.Markdown("训练结果将显示在这里", elem_classes="result-box")
@@ -242,9 +252,9 @@ def create_ui():
                         )
                         lora_upload = gr.File(label="上传 LoRA 权重文件 (.pt)", file_types=[".pt"])
                         with gr.Row():
-                            max_tokens = gr.Slider(50, 500, value=200, step=10, label="最大生成长度")
-                            temperature = gr.Slider(0.1, 2.0, value=0.8, step=0.1, label="Temperature")
-                        top_p = gr.Slider(0.1, 1.0, value=0.9, step=0.05, label="Top P")
+                            max_tokens = gr.Slider(50, 500, value=256, step=10, label="最大生成长度")
+                            temperature = gr.Slider(0.3, 2.0, value=0.9, step=0.1, label="Temperature")
+                        top_p = gr.Slider(0.5, 1.0, value=0.95, step=0.05, label="Top P")
                         transfer_btn = gr.Button("开始转换", variant="primary", size="lg")
                     with gr.Column():
                         transfer_output = gr.Textbox(
@@ -275,14 +285,14 @@ def create_ui():
                             lines=4,
                         )
                         with gr.Row():
-                            p_rank = gr.Slider(2, 32, value=8, step=2, label="LoRA Rank")
-                            p_epochs = gr.Slider(1, 20, value=5, step=1, label="训练轮数")
+                            p_rank = gr.Slider(4, 64, value=16, step=4, label="LoRA Rank")
+                            p_epochs = gr.Slider(5, 30, value=10, step=1, label="训练轮数")
                         with gr.Row():
-                            p_lr = gr.Slider(1e-5, 1e-3, value=1e-4, step=1e-5, label="学习率")
-                            p_max_tokens = gr.Slider(50, 500, value=200, step=10, label="最大生成长度")
+                            p_lr = gr.Slider(1e-5, 5e-4, value=2e-4, step=1e-5, label="学习率")
+                            p_max_tokens = gr.Slider(50, 500, value=256, step=10, label="最大生成长度")
                         with gr.Row():
-                            p_temp = gr.Slider(0.1, 2.0, value=0.8, step=0.1, label="Temperature")
-                            p_top_p = gr.Slider(0.1, 1.0, value=0.9, step=0.05, label="Top P")
+                            p_temp = gr.Slider(0.3, 2.0, value=0.9, step=0.1, label="Temperature")
+                            p_top_p = gr.Slider(0.5, 1.0, value=0.95, step=0.05, label="Top P")
                         pipeline_btn = gr.Button("一键转换", variant="primary", size="lg")
                     with gr.Column():
                         pipeline_stats = gr.Markdown("训练统计将显示在这里")
@@ -308,8 +318,9 @@ def create_ui():
             ### 技术说明
             - **LoRA 实现**: 纯 PyTorch，无外部依赖
             - **基座模型**: Qwen2.5-0.5B-Instruct (ModelScope)
-            - **目标模块**: q_proj, k_proj, v_proj, o_proj
-            - **训练方式**: 自回归语言模型 (Causal LM) 微调
+            - **目标模块**: q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj
+            - **训练方式**: Instruction Tuning + Causal LM 混合
+            - **增强技术**: 数据增强 + Few-shot Prompt + 风格描述自动识别
             """,
             elem_classes="container",
         )
