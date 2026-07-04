@@ -208,8 +208,11 @@ class StyleLoRAModel:
             trust_remote_code=True,
             device_map=None,
             low_cpu_mem_usage=True,
-            gradient_checkpointing=True,
         )
+        try:
+            self.model.gradient_checkpointing_enable()
+        except Exception as e:
+            print(f"gradient_checkpointing not available: {e}")
         self.model.to(self.device)
         self.model.eval()
         print(f"Model loaded. Parameters: {sum(p.numel() for p in self.model.parameters()):,}")
