@@ -246,6 +246,20 @@ class StyleLoRAModel:
         # Decode only the new tokens (skip the input prompt)
         new_tokens = outputs[0][input_len:]
         generated = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+        # Fallback: if empty, decode without skipping special tokens to debug
+        if not generated:
+            raw = self.tokenizer.decode(new_tokens, skip_special_tokens=False)
+            print(f"[DEBUG] Empty generation. Raw tokens: {raw[:200]}")
+            # Try full decode
+            full = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            # Extract assistant part
+            marker = "assistant"
+            if marker in full:
+                generated = full.split(marker)[-1].strip()
+            if not generated:
+                generated = "(模型未生成内容，请重试或调整参数)"
+
         return generated
 
     def style_transfer(

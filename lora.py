@@ -83,39 +83,27 @@ def apply_lora_to_model(
     dropout: float = 0.0,
 ) -> dict:
     """
-    Apply LoRA to all linear layers in the model (or specified target modules).
+    Apply LoRA to target linear layers in the model.
+    Freezes ALL non-LoRA parameters so only LoRA weights are trained.
     Returns a dict mapping module names to LoRALinear wrappers.
     """
     if target_modules is None:
-        target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
     lora_layers = {}
 
-    def _replace_linear(parent, name, child):
-        if not isinstance(child, nn.Linear):
-            return
-        # Only replace if name matches target_modules
-        if not any(t in name for t in target_modules):
-            # Also replace all linear layers for custom models
-            if target_modules == ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]:
-                return
+    # Step 1: Freeze all parameters first
+    for param in model.parameters():
+        param.requires_grad = False
 
-        lora_layer = LoRALinear(child, rank=rank, alpha=alpha, dropout=dropout)
-        setattr(parent, name, lora_layer)
-        lora_layers[name] = lora_layer
-
-    for name, child in list(model.named_children()):
-        _replace_linear(model, name, child)
-
-    # Also handle nested modules
+    # Step 2: Replace target Linear layers with LoRALinear
     for module_name, module in model.named_modules():
         for child_name, child in list(module.named_children()):
-            full_name = f"{module_name}.{child_name}" if module_name else child_name
             if isinstance(child, nn.Linear):
-                should_replace = any(t in child_name for t in target_modules)
-                if should_replace:
+                if any(t in child_name for t in target_modules):
                     lora_layer = LoRALinear(child, rank=rank, alpha=alpha, dropout=dropout)
                     setattr(module, child_name, lora_layer)
+                    full_name = f"{module_name}.{child_name}" if module_name else child_name
                     lora_layers[full_name] = lora_layer
 
     return lora_layers
