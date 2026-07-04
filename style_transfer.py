@@ -10,6 +10,7 @@ from typing import List, Optional
 import os
 import json
 import random
+import time
 
 from lora import apply_lora_to_model, get_lora_state_dict, load_lora_state_dict, count_lora_parameters
 
@@ -207,6 +208,7 @@ class StyleLoRAModel:
             trust_remote_code=True,
             device_map=None,
             low_cpu_mem_usage=True,
+            gradient_checkpointing=True,
         )
         self.model.to(self.device)
         self.model.eval()
@@ -214,8 +216,8 @@ class StyleLoRAModel:
 
     def apply_lora(
         self,
-        rank: int = 16,
-        alpha: float = 32.0,
+        rank: int = 8,
+        alpha: float = 16.0,
         dropout: float = 0.05,
         target_modules: List[str] = None,
     ):
@@ -238,12 +240,12 @@ class StyleLoRAModel:
     def train_style(
         self,
         texts: List[str],
-        epochs: int = 10,
-        batch_size: int = 2,
+        epochs: int = 6,
+        batch_size: int = 1,
         learning_rate: float = 2e-4,
         max_length: int = 512,
-        rank: int = 16,
-        alpha: float = 32.0,
+        rank: int = 8,
+        alpha: float = 16.0,
         progress_callback=None,
     ) -> dict:
         """
@@ -265,6 +267,8 @@ class StyleLoRAModel:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
         stats = {"epochs": [], "final_loss": 0.0}
+        total_batches = len(dataloader)
+        last_report_time = time.time()
 
         self.model.train()
         for epoch in range(epochs):
@@ -291,11 +295,17 @@ class StyleLoRAModel:
 
                 epoch_loss += loss.item()
 
+                current_time = time.time()
+                if current_time - last_report_time > 5 or batch_idx == total_batches - 1:
+                    progress = (epoch * total_batches + batch_idx + 1) / (epochs * total_batches) * 100
+                    print(f"[Progress {progress:.1f}%] Epoch {epoch+1}/{epochs}, Batch {batch_idx+1}/{total_batches}, Loss: {loss.item():.4f}")
+                    last_report_time = current_time
+
                 if progress_callback:
                     progress_callback(
                         epoch=epoch,
                         batch=batch_idx,
-                        total_batches=len(dataloader),
+                        total_batches=total_batches,
                         loss=loss.item(),
                     )
 

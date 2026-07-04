@@ -226,9 +226,9 @@ def create_ui():
                             lines=10,
                         )
                         with gr.Row():
-                            rank = gr.Slider(4, 64, value=16, step=4, label="LoRA Rank")
-                            epochs = gr.Slider(5, 30, value=10, step=1, label="训练轮数")
-                        lr = gr.Slider(1e-5, 5e-4, value=2e-4, step=1e-5, label="学习率")
+                            rank = gr.Slider(4, 32, value=8, step=4, label="LoRA Rank")
+                            epochs = gr.Slider(3, 15, value=6, step=1, label="训练轮数")
+                        lr = gr.Slider(5e-5, 5e-4, value=2e-4, step=5e-5, label="学习率")
                         train_btn = gr.Button("开始训练", variant="primary", size="lg")
                     with gr.Column():
                         train_output = gr.Markdown("训练结果将显示在这里", elem_classes="result-box")
@@ -285,10 +285,10 @@ def create_ui():
                             lines=4,
                         )
                         with gr.Row():
-                            p_rank = gr.Slider(4, 64, value=16, step=4, label="LoRA Rank")
-                            p_epochs = gr.Slider(5, 30, value=10, step=1, label="训练轮数")
+                            p_rank = gr.Slider(4, 32, value=8, step=4, label="LoRA Rank")
+                            p_epochs = gr.Slider(3, 15, value=6, step=1, label="训练轮数")
                         with gr.Row():
-                            p_lr = gr.Slider(1e-5, 5e-4, value=2e-4, step=1e-5, label="学习率")
+                            p_lr = gr.Slider(5e-5, 5e-4, value=2e-4, step=5e-5, label="学习率")
                             p_max_tokens = gr.Slider(50, 500, value=256, step=10, label="最大生成长度")
                         with gr.Row():
                             p_temp = gr.Slider(0.3, 2.0, value=0.9, step=0.1, label="Temperature")
